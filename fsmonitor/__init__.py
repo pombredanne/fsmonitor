@@ -1,4 +1,4 @@
-# Copyright (c) 2010 Luke McCarthy <luke@iogopro.co.uk>
+# Copyright (c) 2010, 2012 Luke McCarthy <luke@iogopro.co.uk>
 #
 # This is free software released under the MIT license.
 # See COPYING file for details, or visit:
@@ -19,54 +19,55 @@ if sys.platform == "linux2":
 elif sys.platform == "win32":
     from .win32 import FSMonitor
 else:
-    raise ImportError("Unsupported platform: %s" % sys.platform)
+    from .polling import FSMonitor
 
 class FSMonitorThread(threading.Thread):
     def __init__(self, callback=None):
         threading.Thread.__init__(self)
-        self.__callback = callback
-        self.__running = True
-        self.__monitor = FSMonitor()
-        self.__events = []
-        self.__events_lock = threading.Lock()
+        self.monitor = FSMonitor()
+        self.callback = callback
+        self._running = True
+        self._events = []
+        self._events_lock = threading.Lock()
         self.daemon = True
         self.start()
 
     def add_dir_watch(self, path, flags=FSEvent.All, user=None):
-        return self.__monitor.add_dir_watch(path, flags=flags, user=user)
+        return self.monitor.add_dir_watch(path, flags=flags, user=user)
 
     def add_file_watch(self, path, flags=FSEvent.All, user=None):
-        return self.__monitor.add_file_watch(path, flags=flags, user=user)
+        return self.monitor.add_file_watch(path, flags=flags, user=user)
 
     def remove_watch(self, watch):
-        self.__monitor.remove_watch(watch)
+        self.monitor.remove_watch(watch)
 
     def remove_all_watches(self):
-        self.__monitor.remove_all_watches()
-        with self.__events_lock:
-            self.__events = []
+        self.monitor.remove_all_watches()
+        with self._events_lock:
+            self._events = []
 
     def run(self):
-        while module_loaded and self.__running:
+        while module_loaded and self._running:
             try:
-                for event in self.__monitor.read_events():
-                    if self.__callback:
-                        self.__callback(event)
-                    else:
-                        with self.__events_lock:
-                            self.__events.append(event)
+                events = self.monitor.read_events()
+                if self.callback:
+                    for event in events:
+                        self.callback(event)
+                else:
+                    with self._events_lock:
+                        self._events.extend(events)
             except Exception:
                 pass
 
     def stop(self):
-        if self.__monitor.watches:
+        if self.monitor.watches:
             self.remove_all_watches()
-            self.__running = False
+            self._running = False
 
     def read_events(self):
-        with self.__events_lock:
-            events = self.__events
-            self.__events = []
+        with self._events_lock:
+            events = self._events
+            self._events = []
             return events
 
 __all__ = (

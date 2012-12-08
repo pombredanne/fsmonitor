@@ -7,7 +7,7 @@
 # The file is part of FSMonitor, a file-system monitoring library.
 # https://github.com/shaurz/fsmonitor
 
-import os, struct, threading
+import os, struct, threading, errno
 from ctypes import CDLL, CFUNCTYPE, POINTER, c_int, c_char_p, c_uint32, get_errno
 from .common import FSEvent, FSMonitorOSError
 
@@ -101,6 +101,7 @@ class FSMonitorWatch(object):
         self.path = path
         self.flags = flags
         self.user = user
+        self.enabled = True
 
     def __repr__(self):
         return "<FSMonitorWatch %r>" % self.path
@@ -146,18 +147,29 @@ class FSMonitor(object):
             for wd in self.__wd_to_watch.iterkeys():
                 inotify_rm_watch(self.__fd, wd)
 
+    def enable_watch(self, watch, enable=True):
+        watch.enabled = enable
+
+    def disable_watch(self, watch):
+        watch.enabled = False
+
     def read_events(self):
-        try:
-            s = os.read(self.__fd, 1024)
-        except OSError, e:
-            raise FSMonitorOSError(*e.args)
+        while True:
+            try:
+                s = os.read(self.__fd, 1024)
+                break
+            except OSError, e:
+                if e.errno != errno.EINTR:
+                    raise FSMonitorOSError(*e.args)
+
         events = []
         if not module_loaded:
             return events
+
         for wd, mask, cookie, name in parse_events(s):
             with self.__lock:
                 watch = self.__wd_to_watch.get(wd)
-            if watch is not None:
+            if watch is not None and watch.enabled:
                 bit = 1
                 while bit < 0x10000:
                     if mask & bit:
